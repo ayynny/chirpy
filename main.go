@@ -1,11 +1,25 @@
 package main
 
-import "net/http"
+import (
+	"net/http"
+	"sync/atomic"
+)
+
+type apiConfig struct {
+	fileserverHits atomic.Int32
+}
 
 func myHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("OK"))
+}
+
+func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cfg.fileserverHits.Add(1)
+		next.ServeHTTP(w, r)
+	})
 }
 
 func main() {
@@ -16,13 +30,16 @@ func main() {
 		Addr:    ":8080",
 	}
 
+	apiConfig := apiConfig{
+		fileserverHits: atomic.Int32{},
+	}
+
 	fileServer := http.FileServer(http.Dir(".")) // returns a http.Handler
 
-	mux.Handle("/app/", http.StripPrefix("/app", fileServer)) //register handler before server starts serving requests
-
+	mux.Handle("/app/", apiConfig.middlewareMetricsInc(http.StripPrefix("/app", fileServer))) // register handler for the pattern /app/, before server starts serving requests
 	mux.HandleFunc("/healthz", myHandler)
 
-	err := s.ListenAndServe()
+	err := s.ListenAndServe() // listens for and serves requests
 	if err != nil {
 		return
 	}
