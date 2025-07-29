@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 	"sync/atomic"
@@ -10,10 +11,28 @@ type apiConfig struct {
 	fileserverHits atomic.Int32
 }
 
-func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
+type Middlewares struct {
+	handlers []func() http.Handler
+}
+
+func middlewareHeaderGetter() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		header := r.Header
+		fmt.Print("header")
+		for key, value := range header {
+			for _, word := range value {
+				keyValue := key + ": " + word + "\n"
+				w.Write([]byte(keyValue))
+				fmt.Println(keyValue)
+			}
+		}
+	})
+}
+
+func (cfg *apiConfig) middlewareMetricsInc() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Print("vistor!")
 		cfg.fileserverHits.Add(1)
-		next.ServeHTTP(w, r)
 	})
 }
 
@@ -33,7 +52,22 @@ func (cfg *apiConfig) countHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (cfg *apiConfig) resetHandler(w http.ResponseWriter, r *http.Request) {
-	cfg.fileserverHits = atomic.Int32{}
+	cfg.fileserverHits.Store(0)
+}
+
+func (m *Middlewares) add(next func() http.Handler) {
+	m.handlers = append(m.handlers, next)
+}
+
+func (m *Middlewares) applyMiddlewares(next http.Handler) func(w http.ResponseWriter, r *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		for _, middlewareHandlers := range m.handlers {
+			if middlewareHandlers != nil {
+				middlewareHandlers()
+			}
+		}
+		next.ServeHTTP(w, r)
+	}
 }
 
 func main() {
@@ -52,12 +86,19 @@ func main() {
 
 	fileServerStripped := http.StripPrefix("/app", fileServer)
 
-	// mux.Handle("/app/", http.StripPrefix("/app", fileServer))
-	mux.Handle("/app/", apiCfg.middlewareMetricsInc(fileServerStripped)) //register handler before server starts serving requests
+	middlewareStack := Middlewares{
+		handlers: make([]func() http.Handler, 2),
+	}
 
-	mux.HandleFunc("/metrics", apiCfg.countHandler)
-	mux.HandleFunc("/healthz", myHandler)
-	mux.HandleFunc("/reset", apiCfg.resetHandler)
+	middlewareStack.add(apiCfg.middlewareMetricsInc)
+	middlewareStack.add(middlewareHeaderGetter)
+
+	mux.HandleFunc("/app/", middlewareStack.applyMiddlewares(fileServerStripped)) //register handler before server starts serving requests
+
+	mux.HandleFunc("GET /metrics", apiCfg.countHandler)
+	mux.HandleFunc("GET /healthz", myHandler)
+	mux.HandleFunc("POST /reset", apiCfg.resetHandler)
+	// mux.Handle("/app/", apiCfg.middlewareHeaderGetter(fileServerStripped))
 
 	err := s.ListenAndServe()
 	if err != nil {
