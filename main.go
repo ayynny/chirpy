@@ -1,7 +1,9 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"sync/atomic"
@@ -11,98 +13,126 @@ type apiConfig struct {
 	fileserverHits atomic.Int32
 }
 
-type Middlewares struct {
-	handlers []func() http.Handler
-}
-
-func middlewareHeaderGetter() http.Handler {
+func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		header := r.Header
-		fmt.Print("header")
-		for key, value := range header {
-			for _, word := range value {
-				keyValue := key + ": " + word + "\n"
-				w.Write([]byte(keyValue))
-				fmt.Println(keyValue)
-			}
-		}
-	})
-}
-
-func (cfg *apiConfig) middlewareMetricsInc() http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Print("vistor!")
 		cfg.fileserverHits.Add(1)
+		next.ServeHTTP(w, r)
 	})
 }
 
+// Simple health check handler
 func myHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("OK"))
 }
 
+// Metrics handler
 func (cfg *apiConfig) countHandler(w http.ResponseWriter, r *http.Request) {
 	count := int(cfg.fileserverHits.Load())
-	str_count := strconv.Itoa(count)
-
-	base := []byte("Hits: ")
-	b := append(base, str_count...)
-	w.Write(b)
+	w.Write([]byte("Hits: " + strconv.Itoa(count)))
 }
 
+// Reset handler
 func (cfg *apiConfig) resetHandler(w http.ResponseWriter, r *http.Request) {
 	cfg.fileserverHits.Store(0)
+	w.Write([]byte("Reset done"))
 }
 
-func (m *Middlewares) add(next func() http.Handler) {
-	m.handlers = append(m.handlers, next)
+func (cfg *apiConfig) metricsHandler(w http.ResponseWriter, r *http.Request) {
+	htmlTemplate := `<html>
+  <body>
+    <h1>Welcome, Chirpy Admin</h1>
+    <p>Chirpy has been visited %d times!</p>
+  </body>
+</html>`
+	sprintfOutput := fmt.Sprintf(htmlTemplate, cfg.fileserverHits.Load())
+	w.Write([]byte(sprintfOutput))
 }
 
-func (m *Middlewares) applyMiddlewares(next http.Handler) func(w http.ResponseWriter, r *http.Request) {
-	return func(w http.ResponseWriter, r *http.Request) {
-		for _, middlewareHandlers := range m.handlers {
-			if middlewareHandlers != nil {
-				middlewareHandlers()
-			}
-		}
-		next.ServeHTTP(w, r)
-	}
-}
-
-func main() {
-	mux := http.NewServeMux() // 1. create a new "router" (ServeMux) which decides what code (handler) to run for various paths
-
-	s := http.Server{ // 2. set up http.Server struct
-		Handler: mux,
-		Addr:    ":8080",
+func validateChirp(w http.ResponseWriter, r *http.Request) {
+	type request struct { // request body
+		Body string `json:"body"`
 	}
 
-	apiCfg := apiConfig{
-		fileserverHits: atomic.Int32{},
-	}
-
-	fileServer := http.FileServer(http.Dir(".")) // returns a http.Handler
-
-	fileServerStripped := http.StripPrefix("/app", fileServer)
-
-	middlewareStack := Middlewares{
-		handlers: make([]func() http.Handler, 2),
-	}
-
-	middlewareStack.add(apiCfg.middlewareMetricsInc)
-	middlewareStack.add(middlewareHeaderGetter)
-
-	mux.HandleFunc("/app/", middlewareStack.applyMiddlewares(fileServerStripped)) //register handler before server starts serving requests
-
-	mux.HandleFunc("GET /metrics", apiCfg.countHandler)
-	mux.HandleFunc("GET /healthz", myHandler)
-	mux.HandleFunc("POST /reset", apiCfg.resetHandler)
-	// mux.Handle("/app/", apiCfg.middlewareHeaderGetter(fileServerStripped))
-
-	err := s.ListenAndServe()
+	decoder := json.NewDecoder(r.Body)      // create a new decoder to read the request json data
+	requestInstance := request{}            // create instance of the request body
+	err := decoder.Decode(&requestInstance) // pass &requestInstance to modify original struct, not the copy (requestInstance).
 	if err != nil {
+		log.Printf("Error decoding parameters: %s", err)
+		w.WriteHeader(500)
 		return
 	}
 
+	type responseErr struct { // response body if there's an error
+		Err string `json:"error"`
+	}
+
+	type responseValid struct { // response body for validity
+		Valid bool `json:"valid"`
+	}
+
+	responseErrInstance := responseErr{}
+	responseValidInstance := responseValid{}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	// check for length of request's body
+	if len(requestInstance.Body) > 140 {
+		responseErrInstance.Err = "Chirp is too long"
+		w.WriteHeader(400)
+		dat, err := json.Marshal(responseErrInstance) // json.Marshal converts Go data structures (like structs) into compact JSON byte arrays
+		if err != nil {
+			log.Printf("Error marshalling JSON: %s", err)
+			w.WriteHeader(500)
+			return
+		}
+		w.Write(dat) // write out the error, in json format
+	} else {
+		w.WriteHeader(200)
+		responseValidInstance.Valid = true
+		dat, err := json.Marshal(responseValidInstance)
+		if err != nil {
+			log.Printf("Error marshalling JSON: %s", err)
+			w.WriteHeader(500)
+			return
+		}
+		w.Write(dat)
+	}
+
+}
+
+func main() {
+	mux := http.NewServeMux()
+
+	apiCfg := apiConfig{}
+
+	// Create file server handler
+	fileServer := http.FileServer(http.Dir("."))
+	fileServerStripped := http.StripPrefix("/app", fileServer)
+
+	// // Build middleware stack
+	// middlewareStack := Middlewares{}
+	// middlewareStack.add(apiCfg.middlewareMetricsInc())
+	// middlewareStack.add(middlewareHeaderGetter())
+
+	// // Apply middleware to file server
+	// mux.Handle("/app/", middlewareStack.applyMiddlewares(fileServerStripped))
+	mux.Handle("/app/", apiCfg.middlewareMetricsInc(fileServerStripped))
+
+	// Register other endpoints
+	mux.HandleFunc("GET /admin/metrics", apiCfg.metricsHandler)
+	mux.HandleFunc("GET /api/healthz", myHandler)
+	mux.HandleFunc("POST /admin/reset", apiCfg.resetHandler)
+	mux.HandleFunc("POST /api/validate_chirp", validateChirp)
+
+	// Start server
+	s := http.Server{
+		Handler: mux,
+		Addr:    ":8080",
+	}
+	fmt.Println("Server listening on http://localhost:8080")
+	if err := s.ListenAndServe(); err != nil {
+		fmt.Println("Server error:", err)
+	}
 }
