@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync/atomic"
 )
 
@@ -68,14 +69,16 @@ func validateChirp(w http.ResponseWriter, r *http.Request) {
 		Err string `json:"error"`
 	}
 
-	type responseValid struct { // response body for validity
-		Valid bool `json:"valid"`
+	type bodyClean struct {
+		BodyToClean string `json:"cleaned_body"`
 	}
 
 	responseErrInstance := responseErr{}
-	responseValidInstance := responseValid{}
+	bodyCleanInstance := bodyClean{}
 
 	w.Header().Set("Content-Type", "application/json")
+
+	badWords := []string{"kerfuffle", "sharbert", "fornax"}
 
 	// check for length of request's body
 	if len(requestInstance.Body) > 140 {
@@ -88,16 +91,32 @@ func validateChirp(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.Write(dat) // write out the error, in json format
+		return
 	} else {
 		w.WriteHeader(200)
-		responseValidInstance.Valid = true
-		dat, err := json.Marshal(responseValidInstance)
+		bodyCleanInstance.BodyToClean = requestInstance.Body
+
+		splitOrg := strings.Split(bodyCleanInstance.BodyToClean, " ")
+
+		for i := range splitOrg {
+			lowered := strings.ToLower(splitOrg[i])
+			for _, word := range badWords {
+				if lowered == word {
+					splitOrg[i] = "****"
+				}
+			}
+		}
+
+		bodyCleanInstance.BodyToClean = strings.Join(splitOrg, " ")
+
+		dat, err := json.Marshal(bodyCleanInstance)
 		if err != nil {
 			log.Printf("Error marshalling JSON: %s", err)
 			w.WriteHeader(500)
 			return
 		}
 		w.Write(dat)
+		return
 	}
 
 }
