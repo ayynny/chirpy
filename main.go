@@ -1,17 +1,24 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"sync/atomic"
+
+	"github.com/ayynny/chirpy/internal/database"
+	"github.com/joho/godotenv"
+	_ "github.com/lib/pq"
 )
 
 type apiConfig struct {
 	fileserverHits atomic.Int32
+	dbQueries      *database.Queries
 }
 
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
@@ -51,6 +58,7 @@ func (cfg *apiConfig) metricsHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(sprintfOutput))
 }
 
+// check length of body and censor bad words
 func validateChirp(w http.ResponseWriter, r *http.Request) {
 	type request struct { // request body
 		Body string `json:"body"`
@@ -121,10 +129,23 @@ func validateChirp(w http.ResponseWriter, r *http.Request) {
 
 }
 
+func userHandler(w http.ResponseWriter, r *http.Request) {
+
+}
+
 func main() {
+	godotenv.Load()
+	dbURL := os.Getenv("DB_URL")
+	db, err := sql.Open("postgres", dbURL)
+	if err != nil {
+		return
+	}
+
 	mux := http.NewServeMux()
 
 	apiCfg := apiConfig{}
+
+	apiCfg.dbQueries = database.New(db)
 
 	// Create file server handler
 	fileServer := http.FileServer(http.Dir("."))
@@ -144,6 +165,7 @@ func main() {
 	mux.HandleFunc("GET /api/healthz", myHandler)
 	mux.HandleFunc("POST /admin/reset", apiCfg.resetHandler)
 	mux.HandleFunc("POST /api/validate_chirp", validateChirp)
+	mux.HandleFunc("POST /api/users", userHandler)
 
 	// Start server
 	s := http.Server{
