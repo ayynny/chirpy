@@ -7,7 +7,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -21,49 +20,22 @@ import (
 type apiConfig struct {
 	fileserverHits atomic.Int32
 	db             *database.Queries
+	platform       string
 }
 
-func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		cfg.fileserverHits.Add(1)
-		next.ServeHTTP(w, r)
-	})
-}
-
-// Simple health check handler
-func myHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("OK"))
-}
-
-// Metrics handler
-func (cfg *apiConfig) countHandler(w http.ResponseWriter, r *http.Request) {
-	count := int(cfg.fileserverHits.Load())
-	w.Write([]byte("Hits: " + strconv.Itoa(count)))
-}
-
-// Delete all users in the database
-func (cfg *apiConfig) resetHandler(w http.ResponseWriter, r *http.Request) {
-	cfg.fileserverHits.Store(0)
-	w.Write([]byte("Reset done"))
-}
-
-func (cfg *apiConfig) metricsHandler(w http.ResponseWriter, r *http.Request) {
-	htmlTemplate := `<html>
-  <body>
-    <h1>Welcome, Chirpy Admin</h1>
-    <p>Chirpy has been visited %d times!</p>
-  </body>
-</html>`
-	sprintfOutput := fmt.Sprintf(htmlTemplate, cfg.fileserverHits.Load())
-	w.Write([]byte(sprintfOutput))
+type Chirp struct {
+	ID        uuid.UUID `json:"id"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Body      string    `json:"email"`
+	UserID    string    `json:"user_id`
 }
 
 // check length of body and censor bad words
-func validateChirp(w http.ResponseWriter, r *http.Request) {
+func (cfg *apiConfig) chirpHandler(w http.ResponseWriter, r *http.Request) {
 	type request struct { // request body
-		Body string `json:"body"`
+		Body   string `json:"body"`
+		UserID string `json:"user_id`
 	}
 
 	decoder := json.NewDecoder(r.Body)      // create a new decoder to read the request json data
@@ -116,6 +88,11 @@ func validateChirp(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
+		newChirp, err := cfg.db.CreateChirp(r.Context(), requestInstance.UserID)
+		if err != nil {
+			log.Printf("Cannot create chirp: %v", err)
+		}
+
 		bodyCleanInstance.BodyToClean = strings.Join(splitOrg, " ")
 		dat, err := json.Marshal(bodyCleanInstance)
 		if err != nil {
@@ -127,48 +104,6 @@ func validateChirp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-}
-
-type User struct {
-	ID        uuid.UUID `json:"id"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-	Email     string    `json:"email"`
-}
-
-func (cfg *apiConfig) createUserHandler(w http.ResponseWriter, r *http.Request) {
-	type request struct {
-		Email string `json:"email"`
-	}
-
-	decoder := json.NewDecoder(r.Body)
-	requestInstance := request{}
-	err := decoder.Decode(&requestInstance)
-	if err != nil {
-		log.Printf("Error decoding parameters: %s", err)
-		w.WriteHeader(500)
-		return
-	}
-
-	createdUser, err := cfg.db.CreateUser(r.Context(), requestInstance.Email)
-	if err != nil {
-		log.Printf("Cannot create user: %s", err)
-	}
-	params := User{
-		ID:        createdUser.ID,
-		CreatedAt: createdUser.CreatedAt,
-		UpdatedAt: createdUser.UpdatedAt,
-		Email:     createdUser.Email,
-	}
-
-	dat, err := json.Marshal(params)
-	if err != nil {
-		log.Fatalf("Cannot marshal user into JSON: %s", err)
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(201)
-	w.Write(dat)
 }
 
 func main() {
@@ -202,8 +137,8 @@ func main() {
 	mux.HandleFunc("GET /admin/metrics", apiCfg.metricsHandler)
 	mux.HandleFunc("GET /api/healthz", myHandler)
 	mux.HandleFunc("POST /admin/reset", apiCfg.resetHandler)
-	mux.HandleFunc("POST /api/validate_chirp", validateChirp)
 	mux.HandleFunc("POST /api/users", apiCfg.createUserHandler)
+	mux.HandleFunc("POST /api/chirps", chirpHandler)
 
 	// Start server
 	s := http.Server{
