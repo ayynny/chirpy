@@ -51,3 +51,14 @@ package main
 // 	}
 // 	return final
 // }
+
+// func main(){
+
+// // Build middleware stack
+// middlewareStack := Middlewares{}
+// middlewareStack.add(apiCfg.middlewareMetricsInc())
+// middlewareStack.add(middlewareHeaderGetter())
+
+// // Apply middleware to file server
+// mux.Handle("/app/", middlewareStack.applyMiddlewares(fileServerStripped))
+// }

@@ -10,15 +10,17 @@ import (
 	"strconv"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/ayynny/chirpy/internal/database"
+	"github.com/google/uuid"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 )
 
 type apiConfig struct {
 	fileserverHits atomic.Int32
-	dbQueries      *database.Queries
+	db             *database.Queries
 }
 
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
@@ -41,7 +43,7 @@ func (cfg *apiConfig) countHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("Hits: " + strconv.Itoa(count)))
 }
 
-// Reset handler
+// Delete all users in the database
 func (cfg *apiConfig) resetHandler(w http.ResponseWriter, r *http.Request) {
 	cfg.fileserverHits.Store(0)
 	w.Write([]byte("Reset done"))
@@ -105,7 +107,6 @@ func validateChirp(w http.ResponseWriter, r *http.Request) {
 		bodyCleanInstance.BodyToClean = requestInstance.Body
 
 		splitOrg := strings.Split(bodyCleanInstance.BodyToClean, " ")
-
 		for i := range splitOrg {
 			lowered := strings.ToLower(splitOrg[i])
 			for _, word := range badWords {
@@ -116,7 +117,6 @@ func validateChirp(w http.ResponseWriter, r *http.Request) {
 		}
 
 		bodyCleanInstance.BodyToClean = strings.Join(splitOrg, " ")
-
 		dat, err := json.Marshal(bodyCleanInstance)
 		if err != nil {
 			log.Printf("Error marshalling JSON: %s", err)
@@ -129,35 +129,73 @@ func validateChirp(w http.ResponseWriter, r *http.Request) {
 
 }
 
-func userHandler(w http.ResponseWriter, r *http.Request) {
+type User struct {
+	ID        uuid.UUID `json:"id"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Email     string    `json:"email"`
+}
 
+func (cfg *apiConfig) createUserHandler(w http.ResponseWriter, r *http.Request) {
+	type request struct {
+		Email string `json:"email"`
+	}
+
+	decoder := json.NewDecoder(r.Body)
+	requestInstance := request{}
+	err := decoder.Decode(&requestInstance)
+	if err != nil {
+		log.Printf("Error decoding parameters: %s", err)
+		w.WriteHeader(500)
+		return
+	}
+
+	createdUser, err := cfg.db.CreateUser(r.Context(), requestInstance.Email)
+	if err != nil {
+		log.Printf("Cannot create user: %s", err)
+	}
+	params := User{
+		ID:        createdUser.ID,
+		CreatedAt: createdUser.CreatedAt,
+		UpdatedAt: createdUser.UpdatedAt,
+		Email:     createdUser.Email,
+	}
+
+	dat, err := json.Marshal(params)
+	if err != nil {
+		log.Fatalf("Cannot marshal user into JSON: %s", err)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	w.Write(dat)
 }
 
 func main() {
 	godotenv.Load()
 	dbURL := os.Getenv("DB_URL")
-	db, err := sql.Open("postgres", dbURL)
+	if dbURL == "" {
+		log.Fatal("DB_URL must be set")
+	}
+
+	dbConn, err := sql.Open("postgres", dbURL)
 	if err != nil {
-		return
+		log.Fatalf("Error opening database: %s", err)
+	}
+
+	dbQueries := database.New(dbConn)
+
+	apiCfg := apiConfig{
+		fileserverHits: atomic.Int32{},
+		db:             dbQueries,
 	}
 
 	mux := http.NewServeMux()
-
-	apiCfg := apiConfig{}
-
-	apiCfg.dbQueries = database.New(db)
 
 	// Create file server handler
 	fileServer := http.FileServer(http.Dir("."))
 	fileServerStripped := http.StripPrefix("/app", fileServer)
 
-	// // Build middleware stack
-	// middlewareStack := Middlewares{}
-	// middlewareStack.add(apiCfg.middlewareMetricsInc())
-	// middlewareStack.add(middlewareHeaderGetter())
-
-	// // Apply middleware to file server
-	// mux.Handle("/app/", middlewareStack.applyMiddlewares(fileServerStripped))
 	mux.Handle("/app/", apiCfg.middlewareMetricsInc(fileServerStripped))
 
 	// Register other endpoints
@@ -165,7 +203,7 @@ func main() {
 	mux.HandleFunc("GET /api/healthz", myHandler)
 	mux.HandleFunc("POST /admin/reset", apiCfg.resetHandler)
 	mux.HandleFunc("POST /api/validate_chirp", validateChirp)
-	mux.HandleFunc("POST /api/users", userHandler)
+	mux.HandleFunc("POST /api/users", apiCfg.createUserHandler)
 
 	// Start server
 	s := http.Server{
