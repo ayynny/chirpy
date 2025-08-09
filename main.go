@@ -81,7 +81,6 @@ func main() {
 			}
 		}
 
-		newChirp, err := cfg.db.CreateChirp(r.Context(), requestInstance.UserID)
 		if err != nil {
 			log.Printf("Cannot create chirp: %v", err)
 		}
@@ -131,7 +130,6 @@ func main() {
 	mux.HandleFunc("GET /api/healthz", myHandler)
 	mux.HandleFunc("POST /admin/reset", apiCfg.resetHandler)
 	mux.HandleFunc("POST /api/users", apiCfg.createUserHandler)
-	mux.HandleFunc("POST /api/chirps", chirpHandler)
 
 	// Start server
 	s := http.Server{
