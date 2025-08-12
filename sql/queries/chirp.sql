@@ -7,4 +7,4 @@ VALUES (
 RETURNING *;
 
 -- name: DeleteChirps :exec
-TRUNCATE TABLE chirps;
+DELETE FROM chirps;

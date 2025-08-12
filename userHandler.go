@@ -17,7 +17,13 @@ type User struct {
 	Email     string    `json:"email"`
 }
 
-func (cfg *apiConfig) createUserHandler(w http.ResponseWriter, r *http.Request) {
+/*
+	create user handler by creating a new decoder on the response body.
+
+make an instance of the request struct and decode on the instance's address
+create a new user by calling the database's CreateUser function
+*/
+func (cfg *apiConfig) handlerUsersCreate(w http.ResponseWriter, r *http.Request) {
 	type request struct {
 		Email string `json:"email"`
 	}
@@ -34,6 +40,8 @@ func (cfg *apiConfig) createUserHandler(w http.ResponseWriter, r *http.Request) 
 	createdUser, err := cfg.db.CreateUser(r.Context(), requestInstance.Email)
 	if err != nil {
 		log.Printf("Cannot create user: %s", err)
+		w.WriteHeader(500)
+		return
 	}
 	params := User{
 		ID:        createdUser.ID,
@@ -44,7 +52,7 @@ func (cfg *apiConfig) createUserHandler(w http.ResponseWriter, r *http.Request) 
 
 	dat, err := json.Marshal(params)
 	if err != nil {
-		log.Fatalf("Cannot marshal user into JSON: %s", err)
+		log.Printf("Cannot marshal user into JSON: %s", err)
 	}
 
 	w.Header().Set("Content-Type", "application/json")

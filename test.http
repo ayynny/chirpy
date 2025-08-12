@@ -1,23 +1,20 @@
-### Test normal message
-POST http://localhost:8080/api/validate_chirp
+
+###
+POST http://localhost:8080/admin/reset
+
+###
+POST http://localhost:8080/api/users
 Content-Type: application/json
 
 {
-  "body": "This is a normal message"
+  "email": "saul1@bettercall.com"
 }
 
-### Test with profane words
-POST http://localhost:8080/api/validate_chirp
+###
+POST http://localhost:8080/api/chirps
 Content-Type: application/json
 
 {
-  "body": "This is a kerfuffle opinion I need to share"
-}
-
-### Test message too long
-POST http://localhost:8080/api/validate_chirp
-Content-Type: application/json
-
-{
-  "body": "This is a very long message that should definitely be over 140 characters and should trigger the length validation error response from the server"
+  "body": "If you're committed enough, you can make any story work.",
+  "user_id": "${userID1}"
 }
