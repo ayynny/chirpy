@@ -17,19 +17,19 @@ type User struct {
 	Email     string    `json:"email"`
 }
 
-/*
-	create user handler by creating a new decoder on the response body.
+type UserRequest struct {
+	Email string `json:"email"`
+}
 
+/*
+create user handler by creating a new decoder on the response body.
 make an instance of the request struct and decode on the instance's address
 create a new user by calling the database's CreateUser function
 */
-func (cfg *apiConfig) handlerUsersCreate(w http.ResponseWriter, r *http.Request) {
-	type request struct {
-		Email string `json:"email"`
-	}
+func (cfg *apiConfig) CreateUserHandler(w http.ResponseWriter, r *http.Request) {
 
 	decoder := json.NewDecoder(r.Body)
-	requestInstance := request{}
+	requestInstance := UserRequest{}
 	err := decoder.Decode(&requestInstance)
 	if err != nil {
 		log.Printf("Error decoding parameters: %s", err)
@@ -61,7 +61,7 @@ func (cfg *apiConfig) handlerUsersCreate(w http.ResponseWriter, r *http.Request)
 }
 
 // Delete all users in the database
-func (cfg *apiConfig) resetHandler(w http.ResponseWriter, r *http.Request) {
+func (cfg *apiConfig) DeleteAllUsersHandler(w http.ResponseWriter, r *http.Request) {
 	dbPlatform := os.Getenv("PLATFORM")
 	if dbPlatform == "" {
 		log.Fatal("PLATFORM must be set")

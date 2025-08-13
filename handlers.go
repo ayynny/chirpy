@@ -5,6 +5,7 @@ import (
 	"net/http"
 )
 
+// Tracks how many times a request has been made to the fileserver
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		cfg.fileserverHits.Add(1)
@@ -13,13 +14,14 @@ func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
 }
 
 // Simple health check handler
-func myHandler(w http.ResponseWriter, r *http.Request) {
+func HealthHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("OK"))
 }
 
-func (cfg *apiConfig) metricsHandler(w http.ResponseWriter, r *http.Request) {
+// Returns how many times Chirpy has been visited
+func (cfg *apiConfig) MetricsHandler(w http.ResponseWriter, r *http.Request) {
 	htmlTemplate := `<html>
   <body>
     <h1>Welcome, Chirpy Admin</h1>

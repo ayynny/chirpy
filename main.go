@@ -48,11 +48,12 @@ func main() {
 	mux.Handle("/app/", apiCfg.middlewareMetricsInc(fileServerStripped))
 
 	// Register other endpoints
-	mux.HandleFunc("GET /admin/metrics", apiCfg.metricsHandler)
-	mux.HandleFunc("GET /api/healthz", myHandler)
-	mux.HandleFunc("POST /admin/reset", apiCfg.resetHandler)
-	mux.HandleFunc("POST /api/users", apiCfg.handlerUsersCreate)
-	mux.HandleFunc("POST /api/chirps", apiCfg.handlerChirpsCreate)
+	mux.HandleFunc("GET /admin/metrics", apiCfg.MetricsHandler)
+	mux.HandleFunc("GET /api/healthz", HealthHandler)
+	mux.HandleFunc("POST /admin/reset", apiCfg.DeleteAllUsersHandler)
+	mux.HandleFunc("POST /api/users", apiCfg.CreateUserHandler)
+	mux.HandleFunc("POST /api/chirps", apiCfg.CreateChirpHandler)
+	mux.HandleFunc("GET /api/chirps", apiCfg.GetAllChirpsHandler)
 
 	// Start server
 	s := http.Server{

@@ -19,16 +19,22 @@ type Chirp struct {
 	UserID    uuid.UUID `json:"user_id"`
 }
 
-// check length of body and censor bad words
-func (cfg *apiConfig) handlerChirpsCreate(w http.ResponseWriter, r *http.Request) {
-	type request struct {
-		Body   string `json:"body"`
-		UserID string `json:"user_id"`
-	}
+type ChirpRequest struct {
+	Body   string `json:"body"`
+	UserID string `json:"user_id"`
+}
 
+/*
+	POST /api/chirps
+
+If a chirp is valid, meaning cleaned bad words and within character limit,
+it is saved in the database with an id, created_at, updated_at, body, and user_id that references
+the id of the user who created the chirp.
+*/
+func (cfg *apiConfig) CreateChirpHandler(w http.ResponseWriter, r *http.Request) {
 	decoder := json.NewDecoder(r.Body)
-	requestInstance := request{}
-	err := decoder.Decode(&requestInstance)
+	chirpRequestInstance := ChirpRequest{}
+	err := decoder.Decode(&chirpRequestInstance)
 	if err != nil {
 		log.Printf("Error decoding parameters: %s", err)
 		w.WriteHeader(500)
@@ -36,7 +42,7 @@ func (cfg *apiConfig) handlerChirpsCreate(w http.ResponseWriter, r *http.Request
 	}
 
 	// Parse UUID
-	uID, err := uuid.Parse(requestInstance.UserID)
+	uID, err := uuid.Parse(chirpRequestInstance.UserID)
 	if err != nil {
 		log.Printf("Error parsing userID: %v", err)
 		w.WriteHeader(400)
@@ -44,7 +50,7 @@ func (cfg *apiConfig) handlerChirpsCreate(w http.ResponseWriter, r *http.Request
 	}
 
 	// Validate length
-	if len(requestInstance.Body) > 140 {
+	if len(chirpRequestInstance.Body) > 140 {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(400)
 		json.NewEncoder(w).Encode(map[string]string{"error": "Chirp is too long"})
@@ -53,7 +59,7 @@ func (cfg *apiConfig) handlerChirpsCreate(w http.ResponseWriter, r *http.Request
 
 	// Clean bad words BEFORE saving to database
 	badWords := []string{"kerfuffle", "sharbert", "fornax"}
-	cleanedBody := cleanBadWords(requestInstance.Body, badWords)
+	cleanedBody := cleanBadWords(chirpRequestInstance.Body, badWords)
 
 	// Create chirp in database
 	chirpParams := database.CreateChirpParams{
@@ -61,7 +67,7 @@ func (cfg *apiConfig) handlerChirpsCreate(w http.ResponseWriter, r *http.Request
 		UserID: uID,
 	}
 
-	createdChirp, err := cfg.db.CreateChirp(r.Context(), chirpParams)
+	chirp, err := cfg.db.CreateChirp(r.Context(), chirpParams)
 	if err != nil {
 		log.Printf("Cannot create chirp: %v", err)
 		w.WriteHeader(500)
@@ -70,11 +76,11 @@ func (cfg *apiConfig) handlerChirpsCreate(w http.ResponseWriter, r *http.Request
 
 	// Return proper chirp response
 	response := Chirp{
-		ID:        createdChirp.ID,
-		CreatedAt: createdChirp.CreatedAt,
-		UpdatedAt: createdChirp.UpdatedAt,
-		Body:      createdChirp.Body,
-		UserID:    createdChirp.UserID,
+		ID:        chirp.ID,
+		CreatedAt: chirp.CreatedAt,
+		UpdatedAt: chirp.UpdatedAt,
+		Body:      chirp.Body,
+		UserID:    chirp.UserID,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -94,3 +100,39 @@ func cleanBadWords(body string, badWords []string) string {
 	}
 	return strings.Join(splitOrg, " ")
 }
+
+/*
+	GET /api/chirps
+
+Returns all chirps in the database in the same structure as
+the POST /api/chirps endpoint but as an array. Ordered by create_at in ascending order.
+200 status code for success
+*/
+func (cfg *apiConfig) GetAllChirpsHandler(w http.ResponseWriter, r *http.Request) {
+
+	allChirps, err := cfg.db.GetAllChirps(r.Context())
+	if err != nil {
+		log.Printf("Cannot get all chirps: %v", err)
+		w.WriteHeader(500)
+		return
+	}
+	w.WriteHeader(200)
+	w.Header().Set("Content-Type", "application/json")
+
+	var arr []Chirp
+
+	for _, curr := range allChirps {
+		chirp := Chirp{
+			ID:        curr.ID,
+			CreatedAt: curr.CreatedAt,
+			UpdatedAt: curr.UpdatedAt,
+			Body:      curr.Body,
+			UserID:    curr.UserID,
+		}
+		arr = append(arr, chirp)
+	}
+	json.NewEncoder(w).Encode(arr)
+
+}
+
+// func (q *Queries) GetAllChirps(ctx context.Context) ([]Chirp, error) {
