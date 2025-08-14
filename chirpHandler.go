@@ -135,4 +135,34 @@ func (cfg *apiConfig) GetAllChirpsHandler(w http.ResponseWriter, r *http.Request
 
 }
 
-// func (q *Queries) GetAllChirps(ctx context.Context) ([]Chirp, error) {
+// func (q *Queries) GetAChirp(ctx context.Context, id uuid.UUID) (Chirp, error) {
+func (cfg *apiConfig) GetAChirpHandler(w http.ResponseWriter, r *http.Request) {
+	chirpID := r.PathValue("chirpID")
+	uuID, err := uuid.Parse(chirpID)
+	if err != nil {
+		log.Printf("Error parsing UUID from chirpID: %v", err)
+		w.WriteHeader(404)
+		return
+	}
+
+	chirp, err := cfg.db.GetAChirp(r.Context(), uuID)
+	log.Printf("chirp: %v", chirp)
+	if err != nil {
+		log.Printf("Error getting the chirp: %v", err)
+		w.WriteHeader(404)
+		return
+	}
+
+	response := Chirp{
+		ID:        chirp.ID,
+		CreatedAt: chirp.CreatedAt,
+		UpdatedAt: chirp.UpdatedAt,
+		Body:      chirp.Body,
+		UserID:    chirp.UserID,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	json.NewEncoder(w).Encode(response)
+}
